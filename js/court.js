@@ -161,6 +161,18 @@ const Court = (() => {
     return s;
   }
 
+  function basketPt(g){ return { bx:50, by: g.flip ? (g.Y1-7) : (g.Y0+7) }; }
+  function isThree(g, px, py){ const {bx,by}=basketPt(g); return Math.hypot(px-bx, py-by) > 41; }
+  function shotsSVG(g, shots){
+    if(!shots||!shots.length) return "";
+    const r=g.full?2.5:2.1;
+    return shots.map(s=>{
+      const x=g.fx(s.x), y=g.fy(s.y);
+      if(s.made) return `<circle cx="${x}" cy="${y}" r="${r}" fill="${s.is3?'#22d3ee':'#3b82f6'}" stroke="#0b1220" stroke-width=".45"/>`;
+      return `<g stroke="#ef4444" stroke-width="1.1" stroke-linecap="round"><line x1="${x-r}" y1="${y-r}" x2="${x+r}" y2="${y+r}"/><line x1="${x+r}" y1="${y-r}" x2="${x-r}" y2="${y+r}"/></g>`;
+    }).join("");
+  }
+
   function ballSVG(g, b){
     const x=g.fx(b.x), y=g.fy(b.y);
     return `<g class="ball" style="cursor:grab" transform="translate(${x},${y})">
@@ -174,6 +186,7 @@ const Court = (() => {
     const svg = `<svg id="courtSVG" viewBox="0 0 ${g.W} ${g.H}" xmlns="http://www.w3.org/2000/svg">
       ${courtSVG(g)}
       ${drawsSVG(g, opts.draws)}
+      ${shotsSVG(g, opts.shots)}
       ${arrowsSVG(g, opts.arrows)}
       ${(opts.opp||[]).map((o,i)=>oppTokenSVG(g,o,i,opts)).join("")}
       ${positions.map((pl,i)=>tokenSVG(g,pl,i,opts)).join("")}
@@ -183,7 +196,7 @@ const Court = (() => {
     const el = container.querySelector("#courtSVG");
     el.setAttribute("id","court");
     el.style.maxWidth = g.full ? "340px" : "560px";
-    if(opts.draggable || opts.onToken || opts.onArrow || opts.ball || opts.onDraw || opts.onOppMove || opts.onErase) enableInteract(el, positions, opts, g);
+    if(opts.draggable || opts.onToken || opts.onArrow || opts.ball || opts.onDraw || opts.onOppMove || opts.onErase || opts.onShot) enableInteract(el, positions, opts, g);
     return el;
   }
 
@@ -226,6 +239,7 @@ const Court = (() => {
     svg.addEventListener("pointerdown", e=>{
       if(active) return;
       if(tool==="erase"){ const p=toSVG(e); const d=g.inv(p.x,p.y); const hit=hitTest(opts,d.x,d.y); if(hit&&opts.onErase) opts.onErase(hit); return; }
+      if(tool==="shot"){ const p=toSVG(e); const d=g.inv(p.x,p.y); opts.onShot&&opts.onShot({x:Math.round(d.x),y:Math.round(d.y),is3:isThree(g,p.x,p.y)}); return; }
       if(tool==="draw"){ const p=toSVG(e); drawing=true; dRaw=[[p.x,p.y]]; dData=[roundPt(g.inv(p.x,p.y))]; try{ svg.setPointerCapture(e.pointerId); }catch(_){} }
       else if(tool==="run" || tool==="pass" || tool==="screen"){ aStart=toSVG(e); moved=false; }
     });

@@ -51,6 +51,7 @@ const App = (() => {
     DB.settings = DB.settings || { autoLandscape:true };
     if(DB.settings.autoLandscape===undefined) DB.settings.autoLandscape=true;
     DB.rotation = DB.rotation || { periods:4, periodMin:10, grid:{} };
+    DB.shots = DB.shots || [];
     if(!DB.club.system && DB.club.formation) DB.club.system = DB.club.formation;
     // merge νέων seed τακτικών/ασκήσεων (χωρίς να χαθούν τα δικά σου)
     let added=false;
@@ -144,6 +145,7 @@ const App = (() => {
     {id:"playbook",  ic:"📋", t:"Συνεργασίες"},
     {id:"training",  ic:"🏋️", t:"Προπονήσεις"},
     {id:"matches",   ic:"🏀", t:"Αγώνες"},
+    {id:"shots",     ic:"🎯", t:"Shot Chart"},
     {id:"analytics", ic:"📊", t:"Αναλυτικά"},
     {id:"schedule",  ic:"📅", t:"Πρόγραμμα"},
     {id:"academy",   ic:"🎓", t:"Ακαδημία Τακτικής"}
@@ -156,7 +158,7 @@ const App = (() => {
     document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
     $("#view-"+v).classList.add("active");
     ({dashboard:renderDashboard,squad:renderSquad,tactics:renderTactics,playbook:renderPlaybook,training:renderTraining,
-      matches:renderMatches,analytics:renderAnalytics,schedule:renderSchedule,academy:renderAcademy}[v])();
+      matches:renderMatches,shots:renderShots,analytics:renderAnalytics,schedule:renderSchedule,academy:renderAcademy}[v])();
     window.scrollTo(0,0);
   }
 
@@ -1465,6 +1467,79 @@ const App = (() => {
   }
 
   /* ============================================================
+     5β) SHOT CHART
+     ============================================================ */
+  let shotPlayer="all", shotMade=true;
+  function renderShots(){
+    const players=[...DB.players].sort((a,b)=>POS_ORDER.indexOf(a.pos)-POS_ORDER.indexOf(b.pos));
+    const shots = shotPlayer==="all" ? DB.shots : DB.shots.filter(s=>s.plId===shotPlayer);
+    const pct=(m,a)=>a?Math.round(m/a*100):0;
+    const att=shots.length, made=shots.filter(s=>s.made).length;
+    const two=shots.filter(s=>!s.is3), three=shots.filter(s=>s.is3);
+    const twoM=two.filter(s=>s.made).length, threeM=three.filter(s=>s.made).length;
+    const pts=twoM*2+threeM*3;
+    const efg = att? Math.round(((made + 0.5*threeM)/att)*100) : 0;
+    const nm=n=>{ const p=DB.players.find(x=>x.id===n); return p? p.name : "Ομάδα"; };
+    // ανά παίκτη σύνοψη (όταν all)
+    const byP = {}; DB.shots.forEach(s=>{ const k=s.plId||"team"; (byP[k]=byP[k]||{a:0,m:0,p:0}); byP[k].a++; if(s.made){byP[k].m++; byP[k].p+= s.is3?3:2;} });
+    $("#view-shots").innerHTML = `
+      <div class="sectionhead"><h2>🎯 Shot Chart</h2>
+        <div class="sub2">Πάτα στο γήπεδο για να καταγράψεις σουτ · αυτόματη ανίχνευση 2/3 πόντων</div>
+        <div class="sp"><button class="btn sm ghost" onclick="App.shotUndo()">↶ Αναίρεση</button><button class="btn sm ghost" onclick="App.printShots()">⇩ PDF</button><button class="btn sm danger" onclick="App.shotClear()">🗑️ Καθαρισμός</button></div>
+      </div>
+      <div class="board-wrap">
+        <div class="card">
+          <div class="tools" style="align-items:center">
+            <label style="margin:0">Παίκτης:</label>
+            <select style="max-width:220px" onchange="App.shotSetPlayer(this.value)"><option value="all" ${shotPlayer==='all'?'selected':''}>Όλοι / Ομάδα</option>${players.map(p=>`<option value="${p.id}" ${shotPlayer===p.id?'selected':''}>${esc(p.name)} (${p.pos})</option>`).join("")}</select>
+            <div class="seg"><button class="${shotMade?'on':''}" onclick="App.shotSetMade(true)">● Εύστοχο</button><button class="${!shotMade?'on':''}" onclick="App.shotSetMade(false)">✕ Άστοχο</button></div>
+          </div>
+          <div id="shotBoard"></div>
+          <div class="legend" style="margin-top:8px">
+            <span><i class="dotc" style="background:#3b82f6"></i>Εύστοχο δίποντο</span>
+            <span><i class="dotc" style="background:#22d3ee"></i>Εύστοχο τρίποντο</span>
+            <span><i class="dotc" style="background:#ef4444"></i>Άστοχο (✕)</span>
+          </div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <h3>📊 Ποσοστά Ευστοχίας <span class="tag">${esc(nm(shotPlayer==='all'?null:shotPlayer))}</span></h3>
+            <div class="grid g2" style="gap:10px">
+              <div class="kpi"><div class="ic">🎯</div><div class="stat"><b>${pct(made,att)}%</b><span>FG% (${made}/${att})</span></div></div>
+              <div class="kpi"><div class="ic">✨</div><div class="stat"><b>${efg}%</b><span>eFG%</span></div></div>
+              <div class="kpi"><div class="ic">2️⃣</div><div class="stat"><b>${pct(twoM,two.length)}%</b><span>Δίποντα (${twoM}/${two.length})</span></div></div>
+              <div class="kpi"><div class="ic">3️⃣</div><div class="stat"><b>${pct(threeM,three.length)}%</b><span>Τρίποντα (${threeM}/${three.length})</span></div></div>
+            </div>
+            <div class="stat" style="margin-top:12px"><b style="color:var(--acc)">${pts}</b><span>Πόντοι από τα καταγεγραμμένα σουτ</span></div>
+          </div>
+          <div class="card">
+            <h3>👟 Ανά Παίκτη</h3>
+            ${Object.keys(byP).length? `<div class="tbl-wrap"><table><thead><tr><th>Παίκτης</th><th class="center">Εύστ/Προσπ</th><th class="center">FG%</th><th class="center">Πόντοι</th></tr></thead>
+              <tbody>${Object.keys(byP).sort((a,b)=>byP[b].p-byP[a].p).map(k=>`<tr><td><b>${esc(nm(k==='team'?null:k))}</b></td><td class="center">${byP[k].m}/${byP[k].a}</td><td class="center"><b style="color:var(--acc)">${pct(byP[k].m,byP[k].a)}%</b></td><td class="center">${byP[k].p}</td></tr>`).join("")}</tbody></table></div>`
+              : '<div class="empty">Δεν έχουν καταγραφεί σουτ ακόμη.</div>'}
+          </div>
+        </div>
+      </div>`;
+    Court.render($("#shotBoard"), [], { shots, tool:"shot",
+      onShot:(s)=>{ DB.shots.push({ x:s.x, y:s.y, is3:s.is3, made:shotMade, plId: shotPlayer==='all'?null:shotPlayer, ts:Date.now() }); save(); renderShots(); } });
+  }
+  function shotSetPlayer(v){ shotPlayer=v; renderShots(); }
+  function shotSetMade(v){ shotMade=v; renderShots(); }
+  function shotUndo(){ const arr = shotPlayer==='all' ? DB.shots : DB.shots.filter(s=>s.plId===shotPlayer); if(!arr.length) return; const last=arr[arr.length-1]; const i=DB.shots.lastIndexOf(last); if(i>=0){ DB.shots.splice(i,1); save(); renderShots(); } }
+  function shotClear(){ if(!confirm(shotPlayer==='all'?"Καθαρισμός ΟΛΩΝ των σουτ;":"Καθαρισμός σουτ του παίκτη;"))return; DB.shots = shotPlayer==='all'? [] : DB.shots.filter(s=>s.plId!==shotPlayer); save(); renderShots(); }
+  function printShots(){
+    const shots = shotPlayer==="all" ? DB.shots : DB.shots.filter(s=>s.plId===shotPlayer);
+    const pct=(m,a)=>a?Math.round(m/a*100):0;
+    const two=shots.filter(s=>!s.is3), three=shots.filter(s=>s.is3);
+    const twoM=two.filter(s=>s.made).length, threeM=three.filter(s=>s.made).length, made=shots.filter(s=>s.made).length;
+    const nm= shotPlayer==='all'?"Ομάδα":(DB.players.find(p=>p.id===shotPlayer)||{}).name;
+    ensurePrint(`<div class="pdoc">${pHead("Shot Chart", DB.club.name+" · "+nm)}
+      <div class="pgrid"><div class="ppitch" id="printShot"></div>
+      <div><h3>Ποσοστά</h3><p class="pmeta"><b>FG%:</b> ${pct(made,shots.length)}% (${made}/${shots.length})<br><b>Δίποντα:</b> ${pct(twoM,two.length)}% (${twoM}/${two.length})<br><b>Τρίποντα:</b> ${pct(threeM,three.length)}% (${threeM}/${three.length})<br><b>Πόντοι:</b> ${twoM*2+threeM*3}</p></div></div>
+      ${pFoot()}</div>`, ()=> Court.render($("#printShot"), [], {shots}));
+  }
+
+  /* ============================================================
      6) ΑΝΑΛΥΤΙΚΑ
      ============================================================ */
   function renderAnalytics(){
@@ -1770,6 +1845,7 @@ const App = (() => {
     printTactic, printSessionDoc, printMicro,
     trainTab:trainTabSet, viewDrill, newDrill, saveDrill, delDrill, saveSession, viewSession, delSession, editMicro, saveMicro,
     openMatch, editMatch, saveMatch, resultMatch, saveResult, delMatch,
+    renderShots, shotSetPlayer, shotSetMade, shotUndo, shotClear, printShots,
     setCmp,
     addEvent, saveEvent,
     editClub, saveClub, quickBoard, installPWA, showOnboarding, finishOnboarding
